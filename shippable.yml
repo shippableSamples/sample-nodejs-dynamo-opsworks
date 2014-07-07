@@ -1,0 +1,34 @@
+language: node_js
+
+node_js:
+  - 0.10.25
+
+env:
+  global:
+    - AWS_DEFAULT_REGION=us-east-1 AWS_STACK=73f89cfc-3f99-4227-a339-73a0ba30acbb AWS_APP_ID=d49ff692-7722-4a7a-9db9-3a661568ddc9
+    - AWS_ACCESS_KEY_ID=AKIAJSZ63DTL3Z7KLVEQ AWS_REAL_REGION=us-west-2
+    - DYNAMODB_LOCAL_DIR=/tmp/dynamodb-local
+    - XUNIT_FILE=shippable/testresults/result.xml
+    - secure: KRaEGMHtRkYxCmWfvHIEkyfoA/+9EWHcoi1CIoIqXrvsF/ILmVVr0jC7X8u7FdfAiXTqn3jYGtLc5mgo5KXe/8zSLtygCr9U1SKJfwCgsw1INENlJiUraHCQqnnty0b3rsTfoetBnnY0yFIl2g+FUm3A57VnGXH/sTcpDZSqHfjCXivptWrSzE9s4W7+pu4vP+9xLh0sTC9IQNcqQ15L7evM2RPeNNv8dQ+DMdf48915M91rnPkxGjxfebAIbIx1SIhR1ur4rEk2pV4LOHo4ny3sasWyqvA49p1xItnGnpQMWGUAzkr24ggOiy3J5FnL8A9oIkf49RtfK1Z2F0EryA==
+
+before_install:
+  - test -e $DYNAMODB_LOCAL_DIR || (mkdir -p $DYNAMODB_LOCAL_DIR && wget http://dynamodb-local.s3-website-us-west-2.amazonaws.com/dynamodb_local_latest -qO- | tar xz -C $DYNAMODB_LOCAL_DIR)
+
+before_script: 
+  - mkdir -p shippable/testresults
+  - mkdir -p shippable/codecoverage
+
+script:
+  - ps -ef | grep [D]ynamoDBLocal | awk '{print $2}' | xargs --no-run-if-empty kill
+  - java -Djava.library.path=$DYNAMODB_LOCAL_DIR/DynamoDBLocal_lib -jar $DYNAMODB_LOCAL_DIR/DynamoDBLocal.jar -inMemory &
+  - DYNAMODB_PID=$!
+  - npm test
+  - ./node_modules/.bin/istanbul cover grunt -- -u tdd
+  - ./node_modules/.bin/istanbul report cobertura --dir  shippable/codecoverage/
+  - kill $DYNAMODB_PID
+ 
+after_success:
+  - >
+    DEPLOY_JSON=$(printf '{"dynamodb": {"aws_key": "%s", "aws_secret": "%s", "region": "%s"}}' $AWS_ACCESS_KEY_ID $AWS_SECRET_ACCESS_KEY $AWS_REAL_REGION)
+  - virtualenv ve && source ve/bin/activate && pip install awscli
+  - aws opsworks create-deployment --stack-id $AWS_STACK --app-id $AWS_APP_ID --command '{"Name":"deploy"}' --custom-json "$DEPLOY_JSON"
